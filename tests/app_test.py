@@ -1,15 +1,20 @@
 import json
+import os
 import pytest
 from pathlib import Path
 
-from project.app import app, db
-
 TEST_DB = "test.db"
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Point the app at the test database before it is imported, so the tests
+# never touch the real (local or Render Postgres) database.
+os.environ["DATABASE_URL"] = f"sqlite:///{BASE_DIR.joinpath(TEST_DB)}"
+
+from project.app import app, db
 
 
 @pytest.fixture
 def client():
-    BASE_DIR = Path(__file__).resolve().parent.parent
     app.config["TESTING"] = True
     app.config["DATABASE"] = BASE_DIR.joinpath(TEST_DB)
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{BASE_DIR.joinpath(TEST_DB)}"
@@ -41,7 +46,7 @@ def test_index(client):
 
 def test_database(client):
     """initial test. ensure that the database exists"""
-    tester = Path("test.db").is_file()
+    tester = BASE_DIR.joinpath(TEST_DB).is_file()
     assert tester
 
 

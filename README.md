@@ -36,7 +36,7 @@ python -m pytest
 
 The tests cover the index page, the database, login and logout, posting, search, and delete with and without login.
 
-The test fixture calls `db.drop_all()`, so run the tests with `DATABASE_URL` unset. Otherwise they would drop the tables in that database.
+The tests always use a separate `test.db` SQLite file (they override `DATABASE_URL`), so they never touch the development or production database.
 
 ## Lint and format
 
