@@ -3,7 +3,7 @@ import json
 import pytest
 from pathlib import Path
 
-from project.app import app, init_db
+from project.app import app, db
 
 TEST_DB = "test.db"
 
@@ -13,10 +13,12 @@ def client():
     BASE_DIR = Path(__file__).resolve().parent.parent
     app.config["TESTING"] = True
     app.config["DATABASE"] = BASE_DIR.joinpath(TEST_DB)
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{BASE_DIR.joinpath(TEST_DB)}"
 
-    init_db()  # setup
-    yield app.test_client()  # tests run here
-    init_db()  # teardown
+    with app.app_context():
+        db.create_all()  # setup
+        yield app.test_client()  # tests run here
+        db.drop_all()  # teardown
 
 
 def login(client, username, password):
@@ -75,8 +77,94 @@ def test_messages(client):
     assert b"<strong>HTML</strong> allowed here" in rv.data
 
 
+def test_search_page_loads(client):
+    """Ensure the search page loads with no query"""
+    rv = client.get("/search/")
+    assert rv.status_code == 200
+    assert b"Search:" in rv.data
+
+
+def test_search_finds_matching_posts(client):
+    """Ensure search matches title or text, ignoring case"""
+    login(client, app.config["USERNAME"], app.config["PASSWORD"])
+    client.post(
+        "/add",
+        data=dict(title="Apple pie", text="Baked fresh"),
+        follow_redirects=True,
+    )
+    client.post(
+        "/add",
+        data=dict(title="Banana bread", text="Contains APPLE sauce"),
+        follow_redirects=True,
+    )
+    client.post(
+        "/add",
+        data=dict(title="Cherry tart", text="No fruit overlap"),
+        follow_redirects=True,
+    )
+
+    rv = client.get("/search/?query=apple")
+    assert rv.status_code == 200
+    assert b"Apple pie" in rv.data  # matched on title
+    assert b"Banana bread" in rv.data  # matched on text, different case
+    assert b"Cherry tart" not in rv.data
+
+
+def test_search_no_results(client):
+    """Ensure a query that matches nothing shows no posts"""
+    login(client, app.config["USERNAME"], app.config["PASSWORD"])
+    client.post(
+        "/add",
+        data=dict(title="Apple pie", text="Baked fresh"),
+        follow_redirects=True,
+    )
+
+    rv = client.get("/search/?query=zzzz")
+    assert rv.status_code == 200
+    assert b"Apple pie" not in rv.data
+
+
 def test_delete_message(client):
     """Ensure the messages are being deleted"""
     rv = client.get("/delete/1")
     data = json.loads(rv.data)
+    assert data["status"] == 0
+    login(client, app.config["USERNAME"], app.config["PASSWORD"])
+    rv = client.get("/delete/1")
+    data = json.loads(rv.data)
     assert data["status"] == 1
+
+
+def test_delete_requires_login(client):
+    """Ensure a logged-out user gets a 401 and the post is not deleted"""
+    login(client, app.config["USERNAME"], app.config["PASSWORD"])
+    client.post(
+        "/add",
+        data=dict(title="Keep me", text="Do not delete"),
+        follow_redirects=True,
+    )
+    logout(client)
+
+    rv = client.get("/delete/1")
+    assert rv.status_code == 401
+    assert json.loads(rv.data)["message"] == "Please log in."
+
+    rv = client.get("/")
+    assert b"Keep me" in rv.data
+
+
+def test_delete_works_when_logged_in(client):
+    """Ensure a logged-in user can delete a post"""
+    login(client, app.config["USERNAME"], app.config["PASSWORD"])
+    client.post(
+        "/add",
+        data=dict(title="Delete me", text="Going away"),
+        follow_redirects=True,
+    )
+
+    rv = client.get("/delete/1")
+    assert rv.status_code == 200
+    assert json.loads(rv.data)["status"] == 1
+
+    rv = client.get("/")
+    assert b"Delete me" not in rv.data
