@@ -2,7 +2,7 @@
 
 
 from project.app import app, db
-from project.models import Post
+from project.models import Post  # noqa: F401 (registers the model with db)
 
 
 with app.app_context():
